@@ -1,60 +1,75 @@
 import React, { useRef, useState } from "react";
-
-// Lámpara de Fototerapia - Single-file React component
-// TailwindCSS utility classes assumed (this file expects Tailwind in the build)
-// Dependencias sugeridas en proyecto: react, react-dom, tailwindcss
+import { Upload, Download, Copy, Info, Zap, Sun, Droplet } from "lucide-react";
 
 export default function FototerapiaApp() {
   const [imageName, setImageName] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
   const [avgColor, setAvgColor] = useState(null);
   const [phototype, setPhototype] = useState(null);
   const [disease, setDisease] = useState("ulcera_superficial");
   const [settings, setSettings] = useState(null);
+  const [copied, setCopied] = useState(false);
   const canvasRef = useRef(null);
 
-  // Lista de enfermedades y sus parámetros base (valor inicial, luego ajustamos por fototipo)
   const DISEASES = {
     ulcera_superficial: {
       label: "Úlcera superficial",
-      desc: "Cicatrización, inflamación local",
-      ledColor: "#FF7F50", // coral (ejemplo)
+      desc: "Cicatrización, reducción de inflamación local",
+      ledColor: "#FF6B6B",
       intensity: 70,
       ir_minutes: 10,
+      icon: "🩹"
     },
-    acné_leve: {
+    acne_leve: {
       label: "Acné leve",
       desc: "Reducir inflamación y bacterias",
-      ledColor: "#0000FF", // azul
+      ledColor: "#4ECDC4",
       intensity: 60,
       ir_minutes: 6,
+      icon: "✨"
     },
     dolor_muscular: {
       label: "Dolor muscular / contractura",
       desc: "Mejora circulación y reduce dolor",
-      ledColor: "#FF4500", // naranja intenso
+      ledColor: "#FF8C42",
       intensity: 80,
       ir_minutes: 12,
+      icon: "💪"
     },
     piel_sensible: {
       label: "Piel sensible / enrojecida",
-      desc: "Calmar enrojecimiento",
-      ledColor: "#00FF7F", // verde claro
+      desc: "Calmar enrojecimiento y sensibilidad",
+      ledColor: "#95E1D3",
       intensity: 40,
       ir_minutes: 5,
+      icon: "🌸"
     },
+    antiedad: {
+      label: "Anti-edad / rejuvenecimiento",
+      desc: "Estimular colágeno y elasticidad",
+      ledColor: "#F38181",
+      intensity: 65,
+      ir_minutes: 8,
+      icon: "🌟"
+    },
+    psoriasis: {
+      label: "Psoriasis / dermatitis",
+      desc: "Reducir placas y descamación",
+      ledColor: "#A8E6CF",
+      intensity: 55,
+      ir_minutes: 9,
+      icon: "🍃"
+    }
   };
 
-  // Heurística simple para aproximar fototipo (I-VI) usando luminosidad y saturación
   function estimatePhototype(r, g, b) {
-    // convertir a HSL para saturación y luminance
     const R = r / 255;
     const G = g / 255;
     const B = b / 255;
     const max = Math.max(R, G, B);
     const min = Math.min(R, G, B);
-    const L = (max + min) / 2; // luminance 0..1
+    const L = (max + min) / 2;
 
-    // heurística (muy aproximada): piel más clara -> fototipo I-II (L alto); piel oscura -> V-VI (L bajo)
     if (L > 0.75) return "I-II";
     if (L > 0.6) return "III";
     if (L > 0.45) return "IV";
@@ -73,6 +88,11 @@ export default function FototerapiaApp() {
   async function handleImageFile(file) {
     if (!file) return;
     setImageName(file.name);
+    
+    const reader = new FileReader();
+    reader.onload = (e) => setImagePreview(e.target.result);
+    reader.readAsDataURL(file);
+
     const img = new Image();
     img.src = URL.createObjectURL(file);
     await img.decode();
@@ -80,24 +100,19 @@ export default function FototerapiaApp() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
 
-    // pintar imagen en canvas (escalada) y muestrear centro
     const w = 300;
     const h = Math.round((img.height / img.width) * w);
     canvas.width = w;
     canvas.height = h;
     ctx.drawImage(img, 0, 0, w, h);
 
-    // muestrear un bloque central (evitar bordes)
     const sx = Math.floor(w * 0.35);
     const sy = Math.floor(h * 0.35);
     const sw = Math.max(20, Math.floor(w * 0.3));
     const sh = Math.max(20, Math.floor(h * 0.3));
 
     const imgData = ctx.getImageData(sx, sy, sw, sh).data;
-    let r = 0,
-      g = 0,
-      b = 0,
-      count = 0;
+    let r = 0, g = 0, b = 0, count = 0;
     for (let i = 0; i < imgData.length; i += 4) {
       r += imgData[i];
       g += imgData[i + 1];
@@ -109,33 +124,25 @@ export default function FototerapiaApp() {
     b = b / count;
     const hex = hexFromRGB(r, g, b);
     setAvgColor({ r: Math.round(r), g: Math.round(g), b: Math.round(b), hex });
-    setPhototype(estimatePhototype(r, g, b));
-
-    // actualizar settings usando heurística
-    computeSettings(disease, estimatePhototype(r, g, b));
-  }
-
-  function roundMinutes(n) {
-    // garantir entero y sin segundos. mínimo 1 minuto si se solicita menos o >0
-    const m = Math.max(1, Math.round(n));
-    return m;
+    
+    const phototypeValue = estimatePhototype(r, g, b);
+    setPhototype(phototypeValue);
+    computeSettings(disease, phototypeValue);
   }
 
   function adjustForPhototype(base, phototypeTag) {
-    // Ajustes conservadores según fototipo (más oscuro -> menor intensidad de LED y menos IR)
-    // Nota: estas son heurísticas de ingeniería, validar clínicamente.
     const map = {
       "I-II": { intensityFactor: 1.0, irFactor: 1.0 },
-      III: { intensityFactor: 0.95, irFactor: 0.95 },
-      IV: { intensityFactor: 0.9, irFactor: 0.9 },
-      V: { intensityFactor: 0.8, irFactor: 0.8 },
-      VI: { intensityFactor: 0.75, irFactor: 0.75 },
+      "III": { intensityFactor: 0.95, irFactor: 0.95 },
+      "IV": { intensityFactor: 0.9, irFactor: 0.9 },
+      "V": { intensityFactor: 0.8, irFactor: 0.8 },
+      "VI": { intensityFactor: 0.75, irFactor: 0.75 }
     };
     const factors = map[phototypeTag] || map.III;
     return {
       ledColor: base.ledColor,
       intensity: Math.round(base.intensity * factors.intensityFactor),
-      ir_minutes: roundMinutes(base.ir_minutes * factors.irFactor),
+      ir_minutes: Math.max(1, Math.round(base.ir_minutes * factors.irFactor))
     };
   }
 
@@ -148,13 +155,13 @@ export default function FototerapiaApp() {
       phototype: phototypeTag,
       led: {
         color: adj.ledColor,
-        intensity_pct: adj.intensity,
+        intensity_pct: adj.intensity
       },
       infrared: {
-        minutes: adj.ir_minutes,
+        minutes: adj.ir_minutes
       },
-      notes:
-        "El tiempo de infrarrojo está en minutos enteros (no segundos). Use la toma inteligente para programar encendido/apagado. Validar clínicamente antes de uso.",
+      timestamp: new Date().toISOString(),
+      notes: "Parámetros calculados automáticamente. Validar con profesional de salud antes de usar."
     };
     setSettings(payload);
     return payload;
@@ -163,7 +170,9 @@ export default function FototerapiaApp() {
   function handleDiseaseChange(e) {
     const key = e.target.value;
     setDisease(key);
-    computeSettings(key, phototype || "III");
+    if (phototype) {
+      computeSettings(key, phototype);
+    }
   }
 
   function downloadJSON() {
@@ -172,7 +181,7 @@ export default function FototerapiaApp() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `fototerapia_settings_${settings.disease}_${new Date().toISOString()}.json`;
+    a.download = `fototerapia_${settings.disease}_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -180,132 +189,212 @@ export default function FototerapiaApp() {
   function copyToClipboard() {
     if (!settings) return;
     navigator.clipboard.writeText(JSON.stringify(settings, null, 2));
-    alert("Ajustes copiados al portapapeles. Péguelos en la app del fabricante o en su sistema domótico.");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white via-slate-50 to-gray-100 p-8">
-      <div className="max-w-4xl mx-auto bg-white/90 backdrop-blur-md rounded-2xl shadow-2xl p-8">
-        <header className="mb-6">
-          <h1 className="text-3xl font-extrabold">Lámpara de Fototerapia — Interfaz</h1>
-          <p className="mt-2 text-sm text-gray-600">Sube la foto del área a tratar para analizar fototipo y generar ajustes recomendados (IR en minutos, LED color/intensidad).</p>
-        </header>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 md:p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-8 animate-fade-in">
+          <div className="inline-flex items-center gap-3 mb-4">
+            <Zap className="w-10 h-10 text-yellow-400" />
+            <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">
+              Fototerapia AI
+            </h1>
+            <Sun className="w-10 h-10 text-orange-400" />
+          </div>
+          <p className="text-slate-300 text-lg max-w-2xl mx-auto">
+            Sistema inteligente de análisis de piel y generación de parámetros terapéuticos
+          </p>
+        </div>
 
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="col-span-1 md:col-span-2">
-            <label className="block font-medium">1. Subir imagen (zona a tratar)</label>
-            <input
-              className="mt-2 block w-full text-sm text-gray-700 file:rounded file:px-3 file:py-2 file:border-none file:shadow-sm file:bg-slate-100"
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleImageFile(e.target.files[0])}
-            />
-            <canvas ref={canvasRef} className="mt-3 rounded-md border" style={{ maxWidth: "100%" }} />
-            {imageName && <p className="mt-2 text-xs text-gray-500">Archivo: {imageName}</p>}
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          {/* Upload Section */}
+          <div className="lg:col-span-2 bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
+            <div className="flex items-center gap-2 mb-4">
+              <Upload className="w-5 h-5 text-cyan-400" />
+              <h2 className="text-xl font-semibold text-white">Análisis de Imagen</h2>
+            </div>
+            
+            <div className="relative">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleImageFile(e.target.files[0])}
+                className="hidden"
+                id="file-upload"
+              />
+              <label
+                htmlFor="file-upload"
+                className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-purple-400/50 rounded-xl cursor-pointer bg-slate-800/50 hover:bg-slate-800/70 transition-all duration-300"
+              >
+                {imagePreview ? (
+                  <img src={imagePreview} alt="Preview" className="w-full h-full object-contain rounded-xl" />
+                ) : (
+                  <div className="flex flex-col items-center">
+                    <Upload className="w-16 h-16 text-purple-400 mb-4" />
+                    <p className="text-slate-300 text-lg font-medium">Subir imagen del área a tratar</p>
+                    <p className="text-slate-500 text-sm mt-2">PNG, JPG hasta 10MB</p>
+                  </div>
+                )}
+              </label>
+            </div>
+            
+            {imageName && (
+              <p className="mt-3 text-sm text-slate-400">📎 {imageName}</p>
+            )}
+            
+            <canvas ref={canvasRef} className="hidden" />
           </div>
 
-          <div className="col-span-1 p-4 border rounded-lg">
-            <label className="block font-medium">2. Seleccionar enfermedad</label>
-            <select value={disease} onChange={handleDiseaseChange} className="mt-2 w-full p-2 rounded-md border">
+          {/* Disease Selection */}
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
+            <div className="flex items-center gap-2 mb-4">
+              <Droplet className="w-5 h-5 text-cyan-400" />
+              <h2 className="text-xl font-semibold text-white">Condición</h2>
+            </div>
+            
+            <select
+              value={disease}
+              onChange={handleDiseaseChange}
+              className="w-full p-3 rounded-xl bg-slate-800/70 text-white border border-purple-400/30 focus:border-purple-400 focus:outline-none transition-all"
+            >
               {Object.keys(DISEASES).map((k) => (
                 <option key={k} value={k}>
-                  {DISEASES[k].label}
+                  {DISEASES[k].icon} {DISEASES[k].label}
                 </option>
               ))}
             </select>
 
-            <div className="mt-4">
-              <p className="text-sm text-gray-600">Descripción:</p>
-              <p className="text-sm">{DISEASES[disease].desc}</p>
+            <div className="mt-4 p-4 bg-slate-800/50 rounded-xl">
+              <p className="text-sm text-slate-400 mb-2">Descripción:</p>
+              <p className="text-white">{DISEASES[disease].desc}</p>
             </div>
 
-            <div className="mt-4">
-              <p className="text-sm text-gray-600">3. Preventas</p>
-              <ul className="text-xs list-disc pl-4 text-gray-600">
-                <li>El infrarrojo solo acepta tiempo en minutos (sin segundos) — la app programará por minutos enteros.</li>
-                <li>El control del LED normalmente se realiza desde la app del fabricante (Hue, LIFX, etc.). Este sistema genera los valores a aplicar allí.</li>
-                <li>Validar los parámetros con personal de salud antes de usar.</li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-6">
-          <h2 className="font-semibold">Resultados del análisis</h2>
-          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-4 border rounded">
-              <p className="text-xs text-gray-500">Color promedio (muestra central)</p>
-              <div className="mt-2 h-12 rounded flex items-center justify-center font-mono text-sm">
-                {avgColor ? (
-                  <div className="w-full h-full rounded flex items-center justify-center" style={{ background: avgColor.hex }}>
-                    <span className="backdrop-blur-sm text-white/90 drop-shadow">{avgColor.hex}</span>
-                  </div>
-                ) : (
-                  <span className="text-gray-400">—</span>
-                )}
-              </div>
-              {avgColor && (
-                <p className="mt-2 text-xs">RGB: {avgColor.r}, {avgColor.g}, {avgColor.b}</p>
-              )}
-            </div>
-
-            <div className="p-4 border rounded">
-              <p className="text-xs text-gray-500">Fototipo estimado</p>
-              <div className="mt-2 text-2xl font-bold">{phototype || "—"}</div>
-              <p className="mt-2 text-xs text-gray-500">Heurística aproximada. Validar clínicamente.</p>
-            </div>
-
-            <div className="p-4 border rounded">
-              <p className="text-xs text-gray-500">Ajustes recomendados</p>
-              {settings ? (
-                <div className="mt-2 text-sm">
-                  <p>LED color: <strong>{settings.led.color}</strong></p>
-                  <p>Intensidad: <strong>{settings.led.intensity_pct}%</strong></p>
-                  <p>Infrarrojo: <strong>{settings.infrared.minutes} min</strong></p>
+            <div className="mt-4 p-4 bg-amber-500/10 rounded-xl border border-amber-500/30">
+              <div className="flex items-start gap-2">
+                <Info className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-200">
+                  <p className="font-semibold mb-1">Importante:</p>
+                  <ul className="space-y-1">
+                    <li>• IR solo en minutos enteros</li>
+                    <li>• Usar toma inteligente para control</li>
+                    <li>• Validar con profesional</li>
+                  </ul>
                 </div>
-              ) : (
-                <p className="mt-2 text-sm text-gray-500">—</p>
-              )}
+              </div>
             </div>
           </div>
+        </div>
 
-          <div className="mt-4 flex gap-3">
-            <button onClick={copyToClipboard} className="px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium shadow">Copiar JSON</button>
-            <button onClick={downloadJSON} className="px-4 py-2 rounded-lg border">Descargar JSON</button>
+        {/* Results Section */}
+        {settings && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 animate-fade-in">
+            {/* Skin Color */}
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
+              <p className="text-slate-400 text-sm mb-3">Color Promedio</p>
+              <div
+                className="w-full h-24 rounded-xl shadow-lg mb-3 flex items-center justify-center"
+                style={{ backgroundColor: avgColor?.hex }}
+              >
+                <span className="text-white font-mono text-lg font-semibold drop-shadow-lg">
+                  {avgColor?.hex}
+                </span>
+              </div>
+              <p className="text-slate-300 text-sm">
+                RGB: {avgColor?.r}, {avgColor?.g}, {avgColor?.b}
+              </p>
+            </div>
+
+            {/* Phototype */}
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
+              <p className="text-slate-400 text-sm mb-3">Fototipo</p>
+              <div className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400 mb-2">
+                {phototype}
+              </div>
+              <p className="text-slate-400 text-xs">Clasificación Fitzpatrick</p>
+            </div>
+
+            {/* Settings */}
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
+              <p className="text-slate-400 text-sm mb-3">Parámetros</p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full" style={{ backgroundColor: settings.led.color }}></div>
+                  <span className="text-white text-sm">LED: {settings.led.color}</span>
+                </div>
+                <p className="text-white text-sm">Intensidad: {settings.led.intensity_pct}%</p>
+                <p className="text-white text-sm">IR: {settings.infrared.minutes} min</p>
+              </div>
+            </div>
           </div>
-        </section>
+        )}
 
-        <section className="mt-6 p-4 bg-yellow-50 border-l-4 border-yellow-300 rounded">
-          <h3 className="font-semibold">Notas importantes de seguridad</h3>
-          <ul className="text-sm list-disc pl-5 mt-2">
-            <li>Este sistema *no* reemplaza la evaluación médica. Los valores son heurísticos y requieren validación clínica.</li>
-            <li>El tiempo de infrarrojo se expresa siempre en minutos enteros (no segundos). Use una toma inteligente para programar encendido/apagado con precisión de minutos.</li>
-            <li>Si la piel está muy sensible, con signos de infección o el paciente tiene condiciones que contraindicquen calor, no aplicar IR sin supervisión médica.</li>
-          </ul>
-        </section>
+        {/* Actions */}
+        {settings && (
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20 mb-6">
+            <div className="flex flex-wrap gap-4">
+              <button
+                onClick={copyToClipboard}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-xl text-white font-semibold hover:from-cyan-600 hover:to-purple-600 transition-all shadow-lg"
+              >
+                <Copy className="w-5 h-5" />
+                {copied ? "¡Copiado!" : "Copiar JSON"}
+              </button>
+              <button
+                onClick={downloadJSON}
+                className="flex items-center gap-2 px-6 py-3 bg-slate-700 rounded-xl text-white font-semibold hover:bg-slate-600 transition-all shadow-lg"
+              >
+                <Download className="w-5 h-5" />
+                Descargar
+              </button>
+            </div>
+          </div>
+        )}
 
-        <section className="mt-6 p-4 border rounded">
-          <h3 className="font-semibold">Cómo usar estos valores en la práctica</h3>
-          <ol className="list-decimal pl-5 text-sm mt-2">
-            <li>Suba la foto del área a tratar y seleccione la enfermedad.</li>
-            <li>Copie o descargue el JSON con los parámetros sugeridos.</li>
-            <li>Abra la app del fabricante del LED (por ejemplo, Philips Hue, LIFX) y ajuste color/intensidad según el JSON.</li>
-            <li>Use una toma inteligente (TP-Link Kasa, Sonoff, etc.) que permita programar encendido por la cantidad de minutos indicada para el infrarrojo.</li>
+        {/* Instructions */}
+        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 shadow-2xl border border-white/20">
+          <h3 className="text-xl font-semibold text-white mb-4">💡 Cómo usar</h3>
+          <ol className="space-y-3 text-slate-300">
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-bold">1</span>
+              <span>Sube una foto del área a tratar</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-bold">2</span>
+              <span>Selecciona la condición a tratar</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-bold">3</span>
+              <span>Copia o descarga el JSON con parámetros</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-bold">4</span>
+              <span>Configura tu LED (Philips Hue, LIFX, etc.) con el color e intensidad</span>
+            </li>
+            <li className="flex gap-3">
+              <span className="flex-shrink-0 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center text-white text-sm font-bold">5</span>
+              <span>Programa la toma inteligente para el tiempo de IR indicado</span>
+            </li>
           </ol>
 
-          <div className="mt-3 text-xs text-gray-600">
-            <strong>Plataformas recomendadas para desplegar la web:</strong>
-            <ul className="list-disc pl-5 mt-1">
-              <li>Vercel — despliegue instantáneo desde GitHub, excelente para React.</li>
-              <li>Netlify — fácil, con funciones y formularios integrados.</li>
-              <li>Firebase Hosting — si quieres integrar auth y base de datos en Google Cloud.</li>
-            </ul>
+          <div className="mt-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
+            <p className="text-red-300 text-sm font-semibold mb-2">⚠️ Advertencia de Seguridad</p>
+            <p className="text-red-200 text-xs">
+              Este sistema NO reemplaza consulta médica. Los valores son estimaciones heurísticas. 
+              Consulta con un profesional de salud antes de usar. No aplicar en piel infectada o 
+              con condiciones que contraindiquen calor.
+            </p>
           </div>
-        </section>
+        </div>
 
-        <footer className="mt-6 text-xs text-gray-500">
-          <p>Entregado: prototipo web visual + generador de parámetros. Para integrar control directo con dispositivos de terceros, necesitarás usar las APIs oficiales de esos fabricantes o el sistema de automatización (Home Assistant, HomeKit, Google Home) y respetar sus requisitos de seguridad y autenticación.</p>
-        </footer>
+        {/* Footer */}
+        <div className="mt-8 text-center text-slate-500 text-sm">
+          <p>Fototerapia AI • Sistema de análisis y recomendación • Uso exclusivo informativo</p>
+        </div>
       </div>
     </div>
   );
